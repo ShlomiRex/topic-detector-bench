@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from .benchmark import benchmark, load_jsonl_dataset, score_examples
+from .benchmark import benchmark, load_jsonl_dataset, measure, score_examples
 from .methods import Candidate, Detector
 from .models import TopicDefinition
 from .report import TopicReport, render_html
@@ -54,23 +54,34 @@ def _detect_command(args: argparse.Namespace) -> int:
 
 
 def _benchmark_all_command(args: argparse.Namespace) -> int:
-    dataset = load_jsonl_dataset(args.dataset)
+    validation_dataset = load_jsonl_dataset(args.dataset)
+    test_dataset = load_jsonl_dataset(args.test_dataset) if args.test_dataset else validation_dataset
     topic_paths = sorted(Path(args.topics_dir).glob("*.yaml"))
     if not topic_paths:
         raise ValueError(f"No YAML topics found in {args.topics_dir}.")
 
-    print("topic                    method                 precision  recall  F-beta  FP  FN")
+    print("topic                    method                 test precision  test recall  F-beta  FP  FN")
     reports: list[TopicReport] = []
     for topic_path in topic_paths:
         topic = TopicDefinition.from_file(topic_path)
-        best = benchmark(topic, dataset, min_recall=args.min_recall, beta=args.beta)[0]
-        metrics, candidate = best.metrics, best.candidate
+        best = benchmark(topic, validation_dataset, min_recall=args.min_recall, beta=args.beta)[0]
+        candidate = best.candidate
+        detector = Detector(topic, candidate)
+        test_metrics = measure(detector, test_dataset, topic.name)
         method = candidate.method if candidate.ngram_size is None else f"{candidate.method}:{candidate.ngram_size}"
         print(
-            f"{topic.name:<24} {method:<22} {metrics.precision:>8.1%}  {metrics.recall:>6.1%}"
-            f"  {best.f_beta:>6.1%}  {metrics.false_positive:>2}  {metrics.false_negative:>2}"
+            f"{topic.name:<24} {method:<22} {test_metrics.precision:>12.1%}  {test_metrics.recall:>9.1%}"
+            f"  {test_metrics.f_beta(args.beta):>6.1%}  {test_metrics.false_positive:>2}  {test_metrics.false_negative:>2}"
         )
-        reports.append(TopicReport(topic.name, best, tuple(score_examples(Detector(topic, candidate), dataset, topic.name))))
+        reports.append(
+            TopicReport(
+                topic.name,
+                best,
+                tuple(score_examples(detector, validation_dataset, topic.name)),
+                test_metrics,
+                tuple(score_examples(detector, test_dataset, topic.name)),
+            )
+        )
     if args.html_report:
         report_path = Path(args.html_report)
         report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -98,6 +109,7 @@ def main() -> int:
     all_parser = commands.add_parser("benchmark-all", help="Select a detector for every YAML topic in a directory.")
     all_parser.add_argument("--topics-dir", required=True)
     all_parser.add_argument("--dataset", required=True)
+    all_parser.add_argument("--test-dataset", help="Held-out JSONL data; never used to select a configuration")
     all_parser.add_argument("--min-recall", type=float, default=0.6)
     all_parser.add_argument("--beta", type=float, default=1.0)
     all_parser.add_argument("--html-report", help="Write an inspectable HTML report for every topic")

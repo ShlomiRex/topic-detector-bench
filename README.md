@@ -70,6 +70,7 @@ Run the full catalog:
 python -m topic_detector_bench.cli benchmark-all `
   --topics-dir examples\topics `
   --dataset examples\evaluation.jsonl `
+  --test-dataset examples\test.jsonl `
   --min-recall 0.60
 ```
 
@@ -79,11 +80,12 @@ Create a self-contained HTML report with the winning configuration and auditable
 python -m topic_detector_bench.cli benchmark-all `
   --topics-dir examples\topics `
   --dataset examples\evaluation.jsonl `
+  --test-dataset examples\test.jsonl `
   --min-recall 0.60 `
   --html-report benchmark-results\benchmark-report.html
 ```
 
-Open `benchmark-results\benchmark-report.html` in any browser. Each topic section shows its winning configuration, metrics, all misclassified prompts in an open “Needs review” table, and correctly classified prompts in a collapsible “Passed” table. Every row includes the final score and its positive/negative evidence.
+`--dataset` is the validation set and chooses the configuration; `--test-dataset` is held out and is never used during selection. Open `benchmark-results\benchmark-report.html` in any browser. Each topic section shows its winning configuration, test metrics, all misclassified test prompts in an open “Needs review” table, and correctly classified test prompts in a collapsible “Passed” table. Every row includes the final score and its positive/negative evidence.
 
 ## Current method suite
 

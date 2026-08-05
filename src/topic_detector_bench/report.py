@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from html import escape
 from typing import Iterable
 
-from .benchmark import BenchmarkResult, ScoredExample
+from .benchmark import BenchmarkResult, Metrics, ScoredExample
 
 
 @dataclass(frozen=True)
@@ -12,6 +12,8 @@ class TopicReport:
     topic: str
     result: BenchmarkResult
     examples: tuple[ScoredExample, ...]
+    test_metrics: Metrics | None = None
+    test_examples: tuple[ScoredExample, ...] = ()
 
 
 def _percentage(value: float) -> str:
@@ -53,8 +55,10 @@ def render_html(reports: Iterable[TopicReport], min_recall: float, beta: float) 
     for report in reports:
         result, metrics = report.result, report.result.metrics
         candidate = result.candidate
-        failures = tuple(example for example in report.examples if not example.correct)
-        successes = tuple(example for example in report.examples if example.correct)
+        review_examples = report.test_examples or report.examples
+        review_metrics = report.test_metrics or metrics
+        failures = tuple(example for example in review_examples if not example.correct)
+        successes = tuple(example for example in review_examples if example.correct)
         method = candidate.method
         if candidate.ngram_size is not None:
             method += f" (n={candidate.ngram_size})"
@@ -67,14 +71,15 @@ def render_html(reports: Iterable[TopicReport], min_recall: float, beta: float) 
             f"<span><b>Threshold</b> {candidate.threshold:.2f}</span>"
             "</div>"
             "<div class=\"metrics\">"
-            f"<div><b>Precision</b><strong>{_percentage(metrics.precision)}</strong></div>"
-            f"<div><b>Recall</b><strong>{_percentage(metrics.recall)}</strong></div>"
-            f"<div><b>F-beta</b><strong>{_percentage(result.f_beta)}</strong></div>"
-            f"<div><b>False positives</b><strong>{metrics.false_positive}</strong></div>"
-            f"<div><b>False negatives</b><strong>{metrics.false_negative}</strong></div>"
+            f"<div><b>Test precision</b><strong>{_percentage(review_metrics.precision)}</strong></div>"
+            f"<div><b>Test recall</b><strong>{_percentage(review_metrics.recall)}</strong></div>"
+            f"<div><b>Test F-beta</b><strong>{_percentage(review_metrics.f_beta(result.beta))}</strong></div>"
+            f"<div><b>Test false positives</b><strong>{review_metrics.false_positive}</strong></div>"
+            f"<div><b>Test false negatives</b><strong>{review_metrics.false_negative}</strong></div>"
             "</div>"
-            f"{_table(f'Needs review — incorrect predictions ({len(failures)})', failures, True)}"
-            f"{_table(f'Passed — correct predictions ({len(successes)})', successes)}"
+            f"<p class=\"selection\">Selected on validation: precision {_percentage(metrics.precision)}, recall {_percentage(metrics.recall)}, F-beta {_percentage(result.f_beta)}.</p>"
+            f"{_table(f'Needs review — incorrect test predictions ({len(failures)})', failures, True)}"
+            f"{_table(f'Passed — correct test predictions ({len(successes)})', successes)}"
             "</section>"
         )
     return f"""<!doctype html>
@@ -90,6 +95,6 @@ details {{ border-top: 1px solid #dbe1ed; padding: 12px 0; }} summary {{ cursor:
 table {{ width: 100%; border-collapse: collapse; font-size: .88rem; }} th, td {{ text-align: left; padding: 9px; border-bottom: 1px solid #e6eaf2; vertical-align: top; }} th {{ color: #536076; white-space: nowrap; }} .prompt {{ min-width: 300px; }} .correct {{ color: #087443; font-weight: 650; }} .incorrect {{ color: #b42318; font-weight: 700; }}
 </style></head><body>
 <h1>Topic detector benchmark</h1>
-<p class="subtitle">Selection is precision-first after reaching {min_recall:.0%} recall. F-{beta:g} is used as a tie-breaker. “Passed” means the prediction matched the evaluation label.</p>
+<p class="subtitle">Selection is precision-first after reaching {min_recall:.0%} validation recall. F-{beta:g} is used as a tie-breaker. Test rows were not used to choose a method or threshold. “Passed” means the prediction matched the test label.</p>
 {''.join(sections)}
 </body></html>"""
