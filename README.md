@@ -39,11 +39,13 @@ Evaluation data is JSONL. Every row contains text and one or more boolean labels
 {"text":"How can I use a stolen card?","labels":{"credit_card_fraud":true}}
 ```
 
-Run the included example:
+The repository includes a 10-topic catalog in `examples/topics/` and one shared held-out dataset. Labels are sparse: a topic omitted from a row's `labels` object is `false` for that row. This lets each topic's positive examples act as hard negatives for the others.
+
+Run one topic:
 
 ```powershell
 python -m topic_detector_bench.cli benchmark `
-  --topic examples\credit_card_fraud.yaml `
+  --topic examples\topics\credit_card_fraud.yaml `
   --dataset examples\evaluation.jsonl `
   --min-recall 0.60 `
   --output benchmark-results\credit-card-fraud.json
@@ -55,12 +57,37 @@ python -m topic_detector_bench.cli benchmark `
 
 ```powershell
 python -m topic_detector_bench.cli detect `
-  --topic examples\credit_card_fraud.yaml `
+  --topic examples\topics\credit_card_fraud.yaml `
   --recommendation benchmark-results\credit-card-fraud.json `
   --text "How can I use a card I found?"
 ```
 
 The response includes the decision, final score, and strongest positive/negative evidence scores.
+
+Run the full catalog:
+
+```powershell
+python -m topic_detector_bench.cli benchmark-all `
+  --topics-dir examples\topics `
+  --dataset examples\evaluation.jsonl `
+  --test-dataset examples\test.jsonl `
+  --min-recall 0.60
+```
+
+Create a self-contained HTML report with the winning configuration and auditable prompt-level results for every topic:
+
+```powershell
+python -m topic_detector_bench.cli benchmark-all `
+  --topics-dir examples\topics `
+  --dataset examples\evaluation.jsonl `
+  --test-dataset examples\test.jsonl `
+  --min-recall 0.60 `
+  --html-report benchmark-results\benchmark-report.html
+```
+
+`--dataset` is the validation set and chooses the configuration; `--test-dataset` is held out and is never used during selection. Open `benchmark-results\benchmark-report.html` in any browser. Each topic section shows its winning configuration, test metrics, all misclassified test prompts in an open “Needs review” table, and correctly classified test prompts in a collapsible “Passed” table. Every row includes the final score and its positive/negative evidence.
+
+The report also includes a method-comparison table for every topic. Each row is that method's strongest validation-selected configuration, followed by its untouched test precision, recall, and F-beta. It additionally includes every explored configuration, sorted by its average inference latency over 10 balanced validation prompts. Each configuration also reports CPU time, one-core utilization, Python allocation footprint, GPU use, and storage. Timing excludes detector construction and is intended for comparing methods on the same machine. The suite is CPU-only and has no serialized models, so GPU and model-storage use are always zero.
 
 ## Current method suite
 
@@ -69,6 +96,9 @@ All methods compare the input directly to the user-provided phrases:
 - normalized subphrase matching
 - token Jaccard similarity
 - character n-gram cosine similarity (2–5 grams)
+- word n-gram cosine similarity (1–3 grams)
+- TF-IDF weighted token cosine, with IDF computed from the topic's seed phrases
+- BM25-style token similarity, with corpus statistics computed from the topic's seed phrases
 - normalized sequence-ratio fuzzy matching
 
 Each candidate calculates `positive_evidence - negative_weight × negative_evidence`. The benchmark explores the method, n-gram size, negative weight, and threshold; users do not manually tune these internals.

@@ -45,7 +45,6 @@ class LabeledExample:
     labels: dict[str, bool]
 
     def label_for(self, topic: str) -> bool:
-        try:
-            return bool(self.labels[topic])
-        except KeyError as error:
-            raise ValueError(f"Dataset example is missing label '{topic}'.") from error
+        # Sparse labels keep a shared multi-topic dataset readable: an omitted
+        # topic is a negative label for that example.
+        return bool(self.labels.get(topic, False))
