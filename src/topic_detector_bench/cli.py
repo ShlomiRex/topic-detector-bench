@@ -4,9 +4,10 @@ import argparse
 import json
 from pathlib import Path
 
-from .benchmark import benchmark, load_jsonl_dataset
+from .benchmark import benchmark, load_jsonl_dataset, score_examples
 from .methods import Candidate, Detector
 from .models import TopicDefinition
+from .report import TopicReport, render_html
 
 
 def _candidate_from_file(path: str) -> Candidate:
@@ -52,6 +53,32 @@ def _detect_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _benchmark_all_command(args: argparse.Namespace) -> int:
+    dataset = load_jsonl_dataset(args.dataset)
+    topic_paths = sorted(Path(args.topics_dir).glob("*.yaml"))
+    if not topic_paths:
+        raise ValueError(f"No YAML topics found in {args.topics_dir}.")
+
+    print("topic                    method                 precision  recall  F-beta  FP  FN")
+    reports: list[TopicReport] = []
+    for topic_path in topic_paths:
+        topic = TopicDefinition.from_file(topic_path)
+        best = benchmark(topic, dataset, min_recall=args.min_recall, beta=args.beta)[0]
+        metrics, candidate = best.metrics, best.candidate
+        method = candidate.method if candidate.ngram_size is None else f"{candidate.method}:{candidate.ngram_size}"
+        print(
+            f"{topic.name:<24} {method:<22} {metrics.precision:>8.1%}  {metrics.recall:>6.1%}"
+            f"  {best.f_beta:>6.1%}  {metrics.false_positive:>2}  {metrics.false_negative:>2}"
+        )
+        reports.append(TopicReport(topic.name, best, tuple(score_examples(Detector(topic, candidate), dataset, topic.name))))
+    if args.html_report:
+        report_path = Path(args.html_report)
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(render_html(reports, args.min_recall, args.beta), encoding="utf-8")
+        print(f"\nSaved HTML report to {report_path}")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Benchmark deterministic topic detectors.")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -68,6 +95,13 @@ def main() -> int:
     detect_parser.add_argument("--recommendation", required=True)
     detect_parser.add_argument("--text", required=True)
     detect_parser.set_defaults(handler=_detect_command)
+    all_parser = commands.add_parser("benchmark-all", help="Select a detector for every YAML topic in a directory.")
+    all_parser.add_argument("--topics-dir", required=True)
+    all_parser.add_argument("--dataset", required=True)
+    all_parser.add_argument("--min-recall", type=float, default=0.6)
+    all_parser.add_argument("--beta", type=float, default=1.0)
+    all_parser.add_argument("--html-report", help="Write an inspectable HTML report for every topic")
+    all_parser.set_defaults(handler=_benchmark_all_command)
     args = parser.parse_args()
     return args.handler(args)
 

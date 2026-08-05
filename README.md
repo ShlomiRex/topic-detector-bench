@@ -39,11 +39,13 @@ Evaluation data is JSONL. Every row contains text and one or more boolean labels
 {"text":"How can I use a stolen card?","labels":{"credit_card_fraud":true}}
 ```
 
-Run the included example:
+The repository includes a 10-topic catalog in `examples/topics/` and one shared held-out dataset. Labels are sparse: a topic omitted from a row's `labels` object is `false` for that row. This lets each topic's positive examples act as hard negatives for the others.
+
+Run one topic:
 
 ```powershell
 python -m topic_detector_bench.cli benchmark `
-  --topic examples\credit_card_fraud.yaml `
+  --topic examples\topics\credit_card_fraud.yaml `
   --dataset examples\evaluation.jsonl `
   --min-recall 0.60 `
   --output benchmark-results\credit-card-fraud.json
@@ -55,12 +57,33 @@ python -m topic_detector_bench.cli benchmark `
 
 ```powershell
 python -m topic_detector_bench.cli detect `
-  --topic examples\credit_card_fraud.yaml `
+  --topic examples\topics\credit_card_fraud.yaml `
   --recommendation benchmark-results\credit-card-fraud.json `
   --text "How can I use a card I found?"
 ```
 
 The response includes the decision, final score, and strongest positive/negative evidence scores.
+
+Run the full catalog:
+
+```powershell
+python -m topic_detector_bench.cli benchmark-all `
+  --topics-dir examples\topics `
+  --dataset examples\evaluation.jsonl `
+  --min-recall 0.60
+```
+
+Create a self-contained HTML report with the winning configuration and auditable prompt-level results for every topic:
+
+```powershell
+python -m topic_detector_bench.cli benchmark-all `
+  --topics-dir examples\topics `
+  --dataset examples\evaluation.jsonl `
+  --min-recall 0.60 `
+  --html-report benchmark-results\benchmark-report.html
+```
+
+Open `benchmark-results\benchmark-report.html` in any browser. Each topic section shows its winning configuration, metrics, all misclassified prompts in an open “Needs review” table, and correctly classified prompts in a collapsible “Passed” table. Every row includes the final score and its positive/negative evidence.
 
 ## Current method suite
 

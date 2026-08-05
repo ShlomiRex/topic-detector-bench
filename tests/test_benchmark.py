@@ -24,3 +24,8 @@ def test_benchmark_prioritizes_precision_after_meeting_minimum_recall() -> None:
     )
     assert results[0].metrics.precision == 1.0
     assert results[0].metrics.recall == 1.0
+
+
+def test_unlisted_topic_label_is_a_negative_label() -> None:
+    example = LabeledExample("unrelated", {"other_topic": True})
+    assert example.label_for("x") is False
