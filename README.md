@@ -87,6 +87,8 @@ python -m topic_detector_bench.cli benchmark-all `
 
 `--dataset` is the validation set and chooses the configuration; `--test-dataset` is held out and is never used during selection. Open `benchmark-results\benchmark-report.html` in any browser. Each topic section shows its winning configuration, test metrics, all misclassified test prompts in an open “Needs review” table, and correctly classified test prompts in a collapsible “Passed” table. Every row includes the final score and its positive/negative evidence.
 
+The report also includes a method-comparison table for every topic. Each row is that method's strongest validation-selected configuration, followed by its untouched test precision, recall, and F-beta. It additionally includes every explored configuration, sorted by its average inference latency over 10 balanced validation prompts. Each configuration also reports CPU time, one-core utilization, Python allocation footprint, GPU use, and storage. Timing excludes detector construction and is intended for comparing methods on the same machine. The suite is CPU-only and has no serialized models, so GPU and model-storage use are always zero.
+
 ## Current method suite
 
 All methods compare the input directly to the user-provided phrases:
@@ -94,6 +96,9 @@ All methods compare the input directly to the user-provided phrases:
 - normalized subphrase matching
 - token Jaccard similarity
 - character n-gram cosine similarity (2–5 grams)
+- word n-gram cosine similarity (1–3 grams)
+- TF-IDF weighted token cosine, with IDF computed from the topic's seed phrases
+- BM25-style token similarity, with corpus statistics computed from the topic's seed phrases
 - normalized sequence-ratio fuzzy matching
 
 Each candidate calculates `positive_evidence - negative_weight × negative_evidence`. The benchmark explores the method, n-gram size, negative weight, and threshold; users do not manually tune these internals.

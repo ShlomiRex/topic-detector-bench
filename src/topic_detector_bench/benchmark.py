@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import tracemalloc
 from collections import defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from time import perf_counter_ns, process_time_ns
 from typing import Iterable
 
 from .methods import Candidate, Detector, candidate_space
@@ -74,6 +76,74 @@ class ScoredExample:
     @property
     def correct(self) -> bool:
         return self.actual == self.predicted
+
+
+@dataclass(frozen=True)
+class InferenceTiming:
+    average_wall_ns: float
+    average_cpu_ns: float
+
+
+@dataclass(frozen=True)
+class MethodResources:
+    detector_python_bytes: int
+    peak_working_python_bytes: int
+
+
+def latency_probe_examples(examples: Iterable[LabeledExample], topic: str, size: int = 10) -> list[LabeledExample]:
+    """Choose a reproducible, roughly balanced timing sample for one topic."""
+    all_examples = list(examples)
+    positives = [example for example in all_examples if example.label_for(topic)]
+    negatives = [example for example in all_examples if not example.label_for(topic)]
+    positive_count = min(len(positives), (size + 1) // 2)
+    selected = positives[:positive_count] + negatives[: size - positive_count]
+    if len(selected) < size:
+        selected += (positives[positive_count:] + negatives[size - positive_count:])[: size - len(selected)]
+    if not selected:
+        raise ValueError("Cannot time an empty dataset.")
+    return selected
+
+
+def average_latency_ns(detector: Detector, examples: Iterable[LabeledExample]) -> float:
+    """Average inference-only latency; detector construction is intentionally excluded."""
+    return average_inference_timing(detector, examples).average_wall_ns
+
+
+def average_inference_timing(detector: Detector, examples: Iterable[LabeledExample]) -> InferenceTiming:
+    """Wall and CPU time per prediction; detector construction is intentionally excluded."""
+    sample = list(examples)
+    if not sample:
+        raise ValueError("Cannot time an empty sample.")
+    wall_start = perf_counter_ns()
+    cpu_start = process_time_ns()
+    for example in sample:
+        detector.predict(example.text)
+    return InferenceTiming(
+        average_wall_ns=(perf_counter_ns() - wall_start) / len(sample),
+        average_cpu_ns=(process_time_ns() - cpu_start) / len(sample),
+    )
+
+
+def profile_method_resources(topic: TopicDefinition, candidate: Candidate, examples: Iterable[LabeledExample]) -> MethodResources:
+    """Measure Python allocations for one method; no GPU or model storage is used."""
+    sample = list(examples)
+    if not sample:
+        raise ValueError("Cannot profile an empty sample.")
+    tracemalloc.start()
+    try:
+        baseline, _ = tracemalloc.get_traced_memory()
+        detector = Detector(topic, candidate)
+        after_detector, _ = tracemalloc.get_traced_memory()
+        tracemalloc.reset_peak()
+        for example in sample:
+            detector.predict(example.text)
+        _, peak = tracemalloc.get_traced_memory()
+        return MethodResources(
+            detector_python_bytes=max(after_detector - baseline, 0),
+            peak_working_python_bytes=max(peak - after_detector, 0),
+        )
+    finally:
+        tracemalloc.stop()
 
 
 def load_jsonl_dataset(path: str | Path) -> list[LabeledExample]:
@@ -179,3 +249,15 @@ def benchmark(
         ),
         reverse=True,
     )
+
+
+def best_per_method(results: Iterable[BenchmarkResult]) -> list[BenchmarkResult]:
+    """Keep the highest-ranked configuration for each method and n-gram size."""
+    leaders: list[BenchmarkResult] = []
+    seen: set[tuple[str, int | None]] = set()
+    for result in results:
+        key = (result.candidate.method, result.candidate.ngram_size)
+        if key not in seen:
+            leaders.append(result)
+            seen.add(key)
+    return leaders

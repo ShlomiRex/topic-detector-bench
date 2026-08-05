@@ -4,10 +4,19 @@ import argparse
 import json
 from pathlib import Path
 
-from .benchmark import benchmark, load_jsonl_dataset, measure, score_examples
+from .benchmark import (
+    average_inference_timing,
+    benchmark,
+    best_per_method,
+    latency_probe_examples,
+    load_jsonl_dataset,
+    measure,
+    profile_method_resources,
+    score_examples,
+)
 from .methods import Candidate, Detector
 from .models import TopicDefinition
-from .report import TopicReport, render_html
+from .report import ConfigurationComparison, MethodComparison, TopicReport, render_html
 
 
 def _candidate_from_file(path: str) -> Candidate:
@@ -64,7 +73,8 @@ def _benchmark_all_command(args: argparse.Namespace) -> int:
     reports: list[TopicReport] = []
     for topic_path in topic_paths:
         topic = TopicDefinition.from_file(topic_path)
-        best = benchmark(topic, validation_dataset, min_recall=args.min_recall, beta=args.beta)[0]
+        validation_results = benchmark(topic, validation_dataset, min_recall=args.min_recall, beta=args.beta)
+        best = validation_results[0]
         candidate = best.candidate
         detector = Detector(topic, candidate)
         test_metrics = measure(detector, test_dataset, topic.name)
@@ -73,6 +83,31 @@ def _benchmark_all_command(args: argparse.Namespace) -> int:
             f"{topic.name:<24} {method:<22} {test_metrics.precision:>12.1%}  {test_metrics.recall:>9.1%}"
             f"  {test_metrics.f_beta(args.beta):>6.1%}  {test_metrics.false_positive:>2}  {test_metrics.false_negative:>2}"
         )
+        configuration_comparisons = ()
+        if args.html_report:
+            latency_examples = latency_probe_examples(validation_dataset, topic.name)
+            method_resources = {}
+            for result in validation_results:
+                key = (result.candidate.method, result.candidate.ngram_size)
+                if key not in method_resources:
+                    method_resources[key] = profile_method_resources(topic, result.candidate, latency_examples)
+
+            def profile_configuration(result):
+                timing = average_inference_timing(Detector(topic, result.candidate), latency_examples)
+                resources = method_resources[(result.candidate.method, result.candidate.ngram_size)]
+                return ConfigurationComparison(
+                    result,
+                    timing.average_wall_ns,
+                    timing.average_cpu_ns,
+                    resources.detector_python_bytes,
+                    resources.peak_working_python_bytes,
+                    len(json.dumps(result.candidate.as_dict(), separators=(",", ":")).encode("utf-8")),
+                )
+
+            configuration_comparisons = tuple(
+                profile_configuration(result)
+                for result in validation_results
+            )
         reports.append(
             TopicReport(
                 topic.name,
@@ -80,6 +115,14 @@ def _benchmark_all_command(args: argparse.Namespace) -> int:
                 tuple(score_examples(detector, validation_dataset, topic.name)),
                 test_metrics,
                 tuple(score_examples(detector, test_dataset, topic.name)),
+                tuple(
+                    MethodComparison(
+                        result,
+                        measure(Detector(topic, result.candidate), test_dataset, topic.name),
+                    )
+                    for result in best_per_method(validation_results)
+                ),
+                configuration_comparisons,
             )
         )
     if args.html_report:
